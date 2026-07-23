@@ -2,8 +2,8 @@
 
 Drop-in [Tabletop Simulator](https://www.tabletopsimulator.com/) object for Oops-style MTG tables. Paste the script onto a token, drop it on the table, and tint each seat’s board chrome and playmat line-work without editing Global.lua or any other Lua files.
 
-**Current version:** `1.0.0` (`SCRIPT_VERSION` in the script)  
-**Script:** [`Seat Color Picker.lua`](Seat%20Color%20Picker.lua)  
+**Current version:** `1.0.1` (`SCRIPT_VERSION` in the script)  
+**Script:** [`seat-color-picker.lua`](seat-color-picker.lua)  
 **Design notes:** [`seat-color-picker.md`](seat-color-picker.md) — read before changing the picker so we don’t re-try dead ends.
 
 ---
@@ -12,7 +12,7 @@ Drop-in [Tabletop Simulator](https://www.tabletopsimulator.com/) object for Oops
 
 ```
 TTS-MTG/
-├── Seat Color Picker.lua   # drop-in object script (paste into a TTS token)
+├── seat-color-picker.lua   # drop-in object script (paste into a TTS token)
 ├── seat-color-picker.md    # design notes / techniques / dead ends
 └── README.md
 ```
@@ -30,7 +30,7 @@ TTS-MTG/
 ## Install / use
 
 1. Create any object (e.g. a Custom Token) in TTS.
-2. Paste the contents of [`Seat Color Picker.lua`](Seat%20Color%20Picker.lua) into that object’s script.
+2. Paste the contents of [`seat-color-picker.lua`](seat-color-picker.lua) into that object’s script.
 3. Drop the object on an Oops MTG table.
 4. Click **Color** → pick hue / SV / hex → **Apply** for mat line-work + board widgets.
 5. Optional: use the **engine seat row** to swap to another stock TTS player color (chat / list / pointer).
@@ -42,7 +42,7 @@ Until **Apply** (or an engine seat pick), the object does not tint widgets or dr
 
 On every `onLoad`, the object fetches this file from:
 
-`https://raw.githubusercontent.com/MrVokerr/TTS-MTG-Color-Picker/master/Seat%20Color%20Picker.lua`
+`https://raw.githubusercontent.com/MrVokerr/TTS-MTG-Color-Picker/master/seat-color-picker.lua`
 
 If remote `SCRIPT_VERSION` differs from the local copy, it calls `setLuaScript` + `reload()`. Saved Objects and old table saves keep their seat tint state (`onSave` / `script_state`) but pull the published script.
 
@@ -52,7 +52,7 @@ If remote `SCRIPT_VERSION` differs from the local copy, it calls `setLuaScript` 
 | `AUTO_UPDATE` | Set `false` to test a local paste without GitHub overwriting it |
 | Offline / GitHub down | Logs a chat message and keeps the bundled script |
 
-**Bootstrap:** Objects that never had the auto-update block cannot self-update — paste this script once, then GitHub is the source of truth.
+**Bootstrap:** Objects that never had the auto-update block cannot self-update — paste this script once, then GitHub is the source of truth. If an object still points at the old `Seat Color Picker.lua` URL (v1.0.0), re-paste once so it uses `seat-color-picker.lua`.
 
 ---
 

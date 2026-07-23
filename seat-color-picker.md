@@ -1,9 +1,9 @@
 # Seat Color Picker — design notes & lessons learned
 
-Living notes from building [`scripts/objects/Seat Color Picker.lua`](../scripts/objects/Seat%20Color%20Picker.lua).  
+Living notes from building [`seat-color-picker.lua`](seat-color-picker.lua).  
 **Read this before changing the picker** so we do not re-try dead ends.
 
-Related short install/use guide: [README § Seat Color Picker](../README.md#seat-color-picker-drop-in).
+Related short install/use guide: [README.md](README.md).
 
 ---
 
@@ -293,7 +293,7 @@ onClick = self.getGUID() .. '/onCalNudge'
 
 | Path | Role |
 |------|------|
-| `scripts/objects/Seat Color Picker.lua` | Only implementation file (`matCal`, shapes, zone align, UI, swap) |
+| `seat-color-picker.lua` | Only implementation file (`matCal`, shapes, zone align, UI, swap) |
 | `README.md` | Short install / use / coverage |
 | `docs/seat-color-picker.md` | This document |
 

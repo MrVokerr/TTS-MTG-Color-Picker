@@ -17,10 +17,10 @@
 -- "Saved Objects" copies always pull the published source of truth.
 -- Bump SCRIPT_VERSION whenever you push a release people should get.
 
-local SCRIPT_VERSION = '1.0.0'
+local SCRIPT_VERSION = '1.0.1'
 local AUTO_UPDATE = true
 local SCRIPT_URL =
-  'https://raw.githubusercontent.com/MrVokerr/TTS-MTG-Color-Picker/master/Seat%20Color%20Picker.lua'
+  'https://raw.githubusercontent.com/MrVokerr/TTS-MTG-Color-Picker/master/seat-color-picker.lua'
 
 local SV_COLS, SV_ROWS = 16, 12
 local HUE_STEPS = 36
@@ -1978,7 +1978,7 @@ end
 
 function onCalPrint(player, value, id)
   local lines = {
-    '-- Paste into Seat Color Picker.lua matCal = { ... }',
+    '-- Paste into seat-color-picker.lua matCal = { ... }',
     string.format('  centerFwd = %.2f,', matCal.centerFwd),
     string.format('  centerRight = %.2f,', matCal.centerRight),
     string.format('  worldW = %.2f,', matCal.worldW),
