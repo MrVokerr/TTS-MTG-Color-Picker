@@ -11,6 +11,16 @@
 --
 -- Event-driven re-apply (turn / connect / drop) restores chrome after
 -- widgets reset themselves — no repeating sticky interval.
+--
+-- Auto-update: onLoad fetches this file from GitHub. If SCRIPT_VERSION
+-- differs, the object replaces its own script and reload()s — saved /
+-- "Saved Objects" copies always pull the published source of truth.
+-- Bump SCRIPT_VERSION whenever you push a release people should get.
+
+local SCRIPT_VERSION = '1.0.0'
+local AUTO_UPDATE = true
+local SCRIPT_URL =
+  'https://raw.githubusercontent.com/MrVokerr/TTS-MTG-Color-Picker/master/Seat%20Color%20Picker.lua'
 
 local SV_COLS, SV_ROWS = 16, 12
 local HUE_STEPS = 36
@@ -26,23 +36,39 @@ local ENGINE_COLORS = {
 ------------------------------------------------------------------------
 -- Playmat line-work overlay (vector loops)
 ------------------------------------------------------------------------
--- Shapes traced from a 1024x505 reference crop of one seat's region on the
--- table texture: {x0, y0, x1, y1, cornerRadius} in image pixels.
-local IMG_W, IMG_H = 1024, 505
-local SHAPES = {
-  { 9,   11,  1014, 500, 12 }, -- outer border
-  { 13,  342, 868,  497, 10 }, -- hand row
-  { 878, 172, 1003, 490, 10 }, -- right column
-  { 913, 201, 968,  273, 8 },  -- icon box 1 (exile / top)
-  { 913, 297, 968,  369, 8 },  -- icon box 2 (deck / library)  ← zone anchor
-  { 913, 393, 968,  465, 8 },  -- icon box 3 (graveyard)       ← zone anchor
-  { 884, 55,  938,  129, 8 },  -- top-right box A
-  { 943, 55,  997,  129, 8 },  -- top-right box B
+-- Shapes traced from a reference crop of one seat's region on the table
+-- texture: {x0, y0, x1, y1, cornerRadius} in image pixels.
+-- 4p/8p crop is 1024x505; 6p crop is 1024x783 (see ref_6p_seat_mat.png).
+-- Zone auto-align still uses deck/GY anchors; only the traced art differs.
+local MAT_4P = {
+  imgW = 1024, imgH = 505,
+  shapes = {
+    { 9,   11,  1014, 500, 12 }, -- outer border
+    { 13,  342, 868,  497, 10 }, -- hand row
+    { 878, 172, 1003, 490, 10 }, -- right column
+    { 913, 201, 968,  273, 8 },  -- icon box 1 (exile / top)
+    { 913, 297, 968,  369, 8 },  -- icon box 2 (deck / library)  ← zone anchor
+    { 913, 393, 968,  465, 8 },  -- icon box 3 (graveyard)       ← zone anchor
+    { 884, 55,  938,  129, 8 },  -- top-right box A
+    { 943, 55,  997,  129, 8 },  -- top-right box B
+  },
+  deckIdx = 5, gyIdx = 6,
 }
--- Image boxes that map to Global data[seat].libraryZone / .graveyard.
--- Aligning those two locks the whole drawing for every seat on 4p/6p/8p.
-local ANCHOR_DECK = SHAPES[5]
-local ANCHOR_GY   = SHAPES[6]
+local MAT_6P = {
+  imgW = 1024, imgH = 783,
+  shapes = {
+    { 8,   8,   1015, 775, 14 }, -- outer border
+    { 8,   554, 875,  775, 10 }, -- hand row
+    { 876, 8,   1015, 775, 10 }, -- right column
+    { 905, 152, 988,  263, 8 },  -- icon box 1 (commander)
+    { 905, 285, 988,  396, 8 },  -- icon box 2 (partner / 2nd cmd)
+    { 890, 425, 1003, 506, 8 },  -- icon box 3 (exile) — wider frame
+    { 905, 521, 988,  632, 8 },  -- icon box 4 (deck / library)  ← zone anchor
+    { 905, 647, 988,  758, 8 },  -- icon box 5 (graveyard)       ← zone anchor
+  },
+  deckIdx = 7, gyIdx = 8,
+}
+
 -- Fine pads on top of zone auto-align (calibrate panel). Hand-math fields
 -- below are fallback only when library/graveyard zones are missing.
 local matCal = {
@@ -109,6 +135,26 @@ local function isSeatColor(color)
     if c == color and not NON_SEATS[c] then return true end
   end
   return false
+end
+
+-- Pick 6p vs 4p/8p traced art from seat count (zones still auto-scale).
+local function activeMatLayout()
+  if #availableSeatList() == 6 then return MAT_6P end
+  return MAT_4P
+end
+
+local function matShapes()
+  return activeMatLayout().shapes
+end
+
+local function matImgSize()
+  local m = activeMatLayout()
+  return m.imgW, m.imgH
+end
+
+local function matAnchors()
+  local m = activeMatLayout()
+  return m.shapes[m.deckIdx], m.shapes[m.gyIdx]
 end
 
 ------------------------------------------------------------------------
@@ -622,8 +668,9 @@ local function seatPixelToWorldFromZones(seat)
   local okG, wGy = pcall(function() return gyObj.getPosition() end)
   if not okD or not okG or not wDeck or not wGy then return nil end
 
-  local idx, idy = boxCenter(ANCHOR_DECK)
-  local igx, igy = boxCenter(ANCHOR_GY)
+  local anchorDeck, anchorGy = matAnchors()
+  local idx, idy = boxCenter(anchorDeck)
+  local igx, igy = boxCenter(anchorGy)
   local iDx, iDy = idx - igx, idy - igy
   local iLen = math.sqrt(iDx * iDx + iDy * iDy)
   local wDx, wDz = wDeck.x - wGy.x, wDeck.z - wGy.z
@@ -686,9 +733,10 @@ local function seatPixelToWorldFromHand(seat)
     sx, sz = -sx, -sz
   end
 
+  local imgW, imgH = matImgSize()
   return function(px, py)
-    local u = (px / IMG_W) - 0.5
-    local v = (py / IMG_H) - 0.5
+    local u = (px / imgW) - 0.5
+    local v = (py / imgH) - 0.5
     local dx = u * 2 * halfW * sx
     local dz = v * 2 * halfH * sz
     return Vector(
@@ -730,6 +778,8 @@ local function borderSignature()
   end
   table.sort(parts)
   -- Include cal so live edits always redraw even if seat color is unchanged.
+  local m = activeMatLayout()
+  table.insert(parts, string.format('mat:%dx%d:%d', m.imgW, m.imgH, #m.shapes))
   table.insert(parts, string.format(
     'cal:%.2f,%.2f,%.2f,%.2f,%s,%s,%s,%.3f,%.3f,%d,%.2f,%.2f,%.2f',
     matCal.centerFwd, matCal.centerRight, matCal.worldW, matCal.worldH,
@@ -762,10 +812,11 @@ function rebuildSeatBorders(force)
     end
   end
 
+  local shapes = matShapes()
   for seat, rgb in pairs(seatColors) do
     local toWorld = seatPixelToWorld(seat)
     if toWorld then
-      for _, shape in ipairs(SHAPES) do
+      for _, shape in ipairs(shapes) do
         table.insert(kept, {
           points = roundedRectPoints(shape[1], shape[2], shape[3], shape[4], shape[5], toWorld),
           color = { rgb.r, rgb.g, rgb.b },
@@ -1983,15 +2034,62 @@ function clickOpenPicker(obj, color, alt)
 end
 
 ------------------------------------------------------------------------
+-- Auto-update (GitHub = source of truth)
+------------------------------------------------------------------------
+
+local function parseScriptVersion(text)
+  if type(text) ~= 'string' then return nil end
+  return text:match("SCRIPT_VERSION%s*=%s*['\"]([%w%.%-]+)['\"]")
+end
+
+-- GitHub wins whenever the version string differs (upgrade or intentional
+-- rollback). Matching versions skip reload so we never loop.
+local function beginAutoUpdate(onDone)
+  if not AUTO_UPDATE then
+    onDone()
+    return
+  end
+  WebRequest.get(SCRIPT_URL, function(req)
+    local code = req and req.response_code
+    local body = req and req.text
+    if (req and req.is_error) or code ~= 200 or type(body) ~= 'string' or #body < 200 then
+      print('[Seat Color Picker] GitHub unreachable; using v'..SCRIPT_VERSION)
+      onDone()
+      return
+    end
+    local remoteVer = parseScriptVersion(body)
+    if not remoteVer then
+      print('[Seat Color Picker] Remote has no SCRIPT_VERSION; using v'..SCRIPT_VERSION)
+      onDone()
+      return
+    end
+    if remoteVer == SCRIPT_VERSION then
+      onDone()
+      return
+    end
+    print('[Seat Color Picker] Updating v'..SCRIPT_VERSION..' → v'..remoteVer..'…')
+    self.setLuaScript(body)
+    -- reload when settled so physics/state are stable; onLoad re-runs and
+    -- sees matching SCRIPT_VERSION, then continues into startPicker.
+    Wait.condition(function()
+      self.reload()
+    end, function()
+      return self.resting
+    end)
+  end)
+end
+
+------------------------------------------------------------------------
 -- Lifecycle
 ------------------------------------------------------------------------
 
-function onLoad(data)
+local function startPicker(data)
   self.setName('Seat Color Picker')
   self.setDescription(
     'Click: open on-screen color UI. Right-click: clear your seat tint.\n'..
     'Apply: custom mat tint. Engine seat buttons: chat/list + mat in that color.\n'..
-    'Nothing is drawn until you Apply or pick an engine seat color.'
+    'Nothing is drawn until you Apply or pick an engine seat color.\n'..
+    'Auto-updates from GitHub on load (v'..SCRIPT_VERSION..').'
   )
   loadSave(data)
   -- Drop any leftover object-attached UI from older script versions.
@@ -2015,6 +2113,12 @@ function onLoad(data)
       end
   end, 1)
   scheduleReapply({ 1.5, 4 })
+end
+
+function onLoad(data)
+  beginAutoUpdate(function()
+    startPicker(data)
+  end)
 end
 
 function onPlayerTurn(player)
