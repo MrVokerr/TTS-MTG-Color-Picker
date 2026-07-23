@@ -2,6 +2,7 @@
 -- Paste onto any token/tile and import onto the 4p / 6p / 8p Oops tables.
 -- Click → SV grid + hue + hex; Apply retints that seat's board widgets and
 -- redraws the seat's playmat line-work as vector loops in the chosen color.
+-- Until Apply, the token does not tint widgets or draw overlays.
 -- Engine seat swap (stock TTS palette only) recolors chat / player list by
 -- re-valuing the seat's hand zone and rebinding seat-coupled widgets at
 -- runtime. No other Lua *files* are edited; everything is done live from
@@ -51,7 +52,7 @@ local matCal = {
   flipX = false,         -- mirror left/right
   flipZ = false,         -- mirror along column (swap deck/gy direction)
   borderY = 0.98,
-  lineThickness = 0.173,
+  lineThickness = 0.4,
   arcSteps = 3,
   -- Fallback (Art Playmat enabler math) if zones unavailable:
   centerFwd = 19.07,
@@ -741,9 +742,10 @@ end
 
 local function isOurLine(line)
   local t = tonumber(line.thickness) or 0
-  -- Match current thickness; also clear the stock sentinel if thickness was nudged.
+  -- Match current thickness; also clear older sentinels if thickness was nudged.
   return math.abs(t - matCal.lineThickness) < 1e-4
     or math.abs(t - 0.173) < 1e-4
+    or math.abs(t - 0.4) < 1e-4
 end
 
 function rebuildSeatBorders(force)
@@ -794,33 +796,35 @@ local function paintObject(obj, seat, r, g, b)
   end
 end
 
-function applySeatCosmetics(seat)
+-- restoreStock: when true and no custom tint, paint stock seat RGB once
+-- (Reset / cancel-preview). When false, leave widgets alone — used on load
+-- and engine-swap so the token does nothing until Apply.
+function applySeatCosmetics(seat, restoreStock)
   if not seat or NON_SEATS[seat] then return end
-  local r, g, b = getSeatRgb(seat)
-  for _, obj in ipairs(getAllObjects()) do
-    paintObject(obj, seat, r, g, b)
-  end
-  if seatColors[seat] then
+  local custom = seatColors[seat]
+  if custom then
+    local r, g, b = custom.r, custom.g, custom.b
+    for _, obj in ipairs(getAllObjects()) do
+      paintObject(obj, seat, r, g, b)
+    end
     fixHandCountDisplays(seat, { r = r, g = g, b = b })
-  else
+  elseif restoreStock then
+    local r, g, b = defaultSeatRgb(seat)
+    for _, obj in ipairs(getAllObjects()) do
+      paintObject(obj, seat, r, g, b)
+    end
     restoreHandCountDisplays(seat)
   end
   rebuildSeatBorders()
 end
 
 function applyAllSeatCosmetics()
-  local seats = {}
+  -- Re-apply only seats that opted in via Apply (or live preview).
   for seat, _ in pairs(seatColors) do
-    seats[seat] = true
-  end
-  -- Re-paint known seats so widgets that reset on turn/onload restore cosmetics.
-  if next(seatColors) then
-    for _, seat in ipairs(availableSeatList()) do
-      seats[seat] = true
-    end
-  end
-  for seat, _ in pairs(seats) do
     applySeatCosmetics(seat)
+  end
+  if not next(seatColors) then
+    rebuildSeatBorders()
   end
 end
 
@@ -953,14 +957,13 @@ local function performSwap(fromColor, toColor)
   end
   aliasGlobalTables(fromColor, toColor)
   local origin = originOf(fromColor) or fromColor
+  -- Engine palette pick also paints mat line-work + widgets in that color.
   seatColors[fromColor] = nil
   if toColor == origin then
     swaps[origin] = nil
-    -- Revert: drop custom tint so the original seat looks stock again.
     seatColors[toColor] = nil
   else
     swaps[origin] = toColor
-    -- Engine palette pick also paints the mat line-work + widgets.
     local r, g, b = defaultSeatRgb(toColor)
     seatColors[toColor] = { r = r, g = g, b = b }
   end
@@ -975,6 +978,7 @@ local function performSwap(fromColor, toColor)
     end)
     rebindSeatWidgets(fromColor, toColor)
     lastBorderSig = nil
+    applySeatCosmetics(fromColor, true)
     applySeatCosmetics(toColor)
     scheduleReapply({ 0.5, 1.5, 3 })
   end, 2)
@@ -1655,10 +1659,11 @@ local function restoreSeatBaseline(sess)
     seatColors[sess.seat] = {
       r = sess.baseline.r, g = sess.baseline.g, b = sess.baseline.b
     }
+    applySeatCosmetics(sess.seat)
   else
     seatColors[sess.seat] = nil
+    applySeatCosmetics(sess.seat, true)
   end
-  applySeatCosmetics(sess.seat)
 end
 
 local function openPicker(player)
@@ -1780,6 +1785,7 @@ end
 function onResetColor(player, value, id)
   local sess = getSession(player)
   if not sess then return end
+  local hadCustom = seatColors[sess.seat] ~= nil or sess.baseline ~= nil
   seatColors[sess.seat] = nil
   sess.baseline = nil
   sess.applied = true
@@ -1787,10 +1793,11 @@ function onResetColor(player, value, id)
   local r, g, b = defaultSeatRgb(sess.seat)
   local h, s, v = rgbToHsv(r, g, b)
   sess.h, sess.s, sess.v = h, s, v
-  applySeatCosmetics(sess.seat)
+  lastBorderSig = nil
+  applySeatCosmetics(sess.seat, hadCustom)
   scheduleReapply()
   syncUiFromSession(sess)
-  player.broadcast('Reset '..sess.seat..' to default seat color.', {0.8, 0.8, 0.8})
+  player.broadcast('Cleared custom tint for '..sess.seat..' (stock board).', {0.8, 0.8, 0.8})
 end
 
 function onApplyColor(player, value, id)
@@ -1951,7 +1958,9 @@ function clickOpenPicker(obj, color, alt)
       player.broadcast('Sit at a player seat to reset color.', {1, 0.5, 0.3})
       return
     end
+    local hadCustom = seatColors[color] ~= nil
     if sessions[color] then
+      hadCustom = hadCustom or sessions[color].baseline ~= nil
       sessions[color].applied = true
       sessions[color] = nil
       if uiOwner == color then
@@ -1961,12 +1970,13 @@ function clickOpenPicker(obj, color, alt)
     end
     seatColors[color] = nil
     updateSave()
-    applySeatCosmetics(color)
+    lastBorderSig = nil
+    applySeatCosmetics(color, hadCustom)
     scheduleReapply()
     if not uiOwner then
       showOpenButton()
     end
-    player.broadcast('Reset '..color..' to default seat color.', {0.8, 0.8, 0.8})
+    player.broadcast('Cleared custom tint for '..color..' (stock board).', {0.8, 0.8, 0.8})
     return
   end
   openPicker(player)
@@ -1979,9 +1989,9 @@ end
 function onLoad(data)
   self.setName('Seat Color Picker')
   self.setDescription(
-    'Click: open on-screen color UI. Right-click: reset your seat tint.\n'..
-    'Custom RGB tints board widgets + playmat line-work (vector overlay).\n'..
-    'Engine seat swap (TTS palette) recolors chat / player list for real.'
+    'Click: open on-screen color UI. Right-click: clear your seat tint.\n'..
+    'Apply: custom mat tint. Engine seat buttons: chat/list + mat in that color.\n'..
+    'Nothing is drawn until you Apply or pick an engine seat color.'
   )
   loadSave(data)
   -- Drop any leftover object-attached UI from older script versions.
