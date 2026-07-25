@@ -14,10 +14,10 @@ local STEAM_ID = '76561197991782511'
 local TARGET = 'Purple'
 local PICKER_NAME = 'Seat Color Picker'
 
--- Hosted on this repo (replace assets/mat.png + push to update).
+-- Purple-baked COLORMTG (transparent seat filled purple). 9500x5600.
 -- jsDelivr avoids stale raw.githubusercontent.com cache after replaces.
 local MAT_IMAGE_URL =
-  'https://cdn.jsdelivr.net/gh/MrVokerr/TTS-MTG-Color-Picker@master/assets/mat.png'
+  'https://cdn.jsdelivr.net/gh/MrVokerr/TTS-MTG-Color-Picker@master/assets/mat-purple.png'
 
 local NON_SEATS = { Grey = true, Black = true }
 local savedTableUrl = nil
@@ -123,10 +123,18 @@ function clickVokerPurple(obj, color, alt)
 
   if alt then
     restoreMatImage(player)
-    picker.call('forceEngineRevertSteam', { steam_id = STEAM_ID })
+    picker.call('forceEngineRevertSteam', {
+      steam_id = STEAM_ID,
+      skip_vectors = true,
+    })
   else
     applyMatImage(player)
-    picker.call('forceEngineSwapSteam', { steam_id = STEAM_ID, target = TARGET })
+    -- Texture mat supplies the purple seat lines; skip vector overlays.
+    picker.call('forceEngineSwapSteam', {
+      steam_id = STEAM_ID,
+      target = TARGET,
+      skip_vectors = true,
+    })
   end
 end
 

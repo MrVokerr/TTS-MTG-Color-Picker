@@ -837,10 +837,25 @@ local function paintObject(obj, seat, r, g, b)
   end
 end
 
+local function clearOurVectorLines()
+  local kept = {}
+  local ok, existing = pcall(function() return Global.getVectorLines() end)
+  if ok and type(existing) == 'table' then
+    for _, line in ipairs(existing) do
+      if not isOurLine(line) then
+        table.insert(kept, line)
+      end
+    end
+  end
+  pcall(function() Global.setVectorLines(kept) end)
+  lastBorderSig = nil
+end
+
 -- restoreStock: when true and no custom tint, paint stock seat RGB once
 -- (Reset / cancel-preview). When false, leave widgets alone — used on load
 -- and engine-swap so the token does nothing until Apply.
-function applySeatCosmetics(seat, restoreStock)
+-- skipVectors: paint widgets only (texture mat supplies seat lines).
+function applySeatCosmetics(seat, restoreStock, skipVectors)
   if not seat or NON_SEATS[seat] then return end
   local custom = seatColors[seat]
   if custom then
@@ -856,7 +871,11 @@ function applySeatCosmetics(seat, restoreStock)
     end
     restoreHandCountDisplays(seat)
   end
-  rebuildSeatBorders()
+  if skipVectors then
+    clearOurVectorLines()
+  else
+    rebuildSeatBorders()
+  end
 end
 
 function applyAllSeatCosmetics()
@@ -989,21 +1008,31 @@ local function canSwapTo(fromColor, toColor)
   return true
 end
 
-local function performSwap(fromColor, toColor)
+-- opts.skip_vectors: widgets still tint; seat line-work comes from table texture
+-- (e.g. COLORMTG transparent seat baked purple) instead of Global vector loops.
+local function performSwap(fromColor, toColor, opts)
+  opts = opts or {}
+  local skipVectors = opts.skip_vectors and true or false
   for _, zone in ipairs(seatHandZones(fromColor)) do
     pcall(function() zone.setValue(toColor) end)
   end
   aliasGlobalTables(fromColor, toColor)
   local origin = originOf(fromColor) or fromColor
   -- Engine palette pick also paints mat line-work + widgets in that color.
+  -- skip_vectors: texture mat (e.g. COLORMTG) owns seat lines — do not store
+  -- seatColors for this seat or vector re-apply will redraw loops on top.
   seatColors[fromColor] = nil
   if toColor == origin then
     swaps[origin] = nil
     seatColors[toColor] = nil
   else
     swaps[origin] = toColor
-    local r, g, b = defaultSeatRgb(toColor)
-    seatColors[toColor] = { r = r, g = g, b = b }
+    if not skipVectors then
+      local r, g, b = defaultSeatRgb(toColor)
+      seatColors[toColor] = { r = r, g = g, b = b }
+    else
+      seatColors[toColor] = nil
+    end
   end
   updateSave()
   -- Give the engine a couple frames to register the new seat before moving
@@ -1016,9 +1045,19 @@ local function performSwap(fromColor, toColor)
     end)
     rebindSeatWidgets(fromColor, toColor)
     lastBorderSig = nil
-    applySeatCosmetics(fromColor, true)
-    applySeatCosmetics(toColor)
-    scheduleReapply({ 0.5, 1.5, 3 })
+    if skipVectors then
+      applySeatCosmetics(fromColor, true, true)
+      local r, g, b = defaultSeatRgb(toColor)
+      for _, obj in ipairs(getAllObjects()) do
+        paintObject(obj, toColor, r, g, b)
+      end
+      fixHandCountDisplays(toColor, { r = r, g = g, b = b })
+      clearOurVectorLines()
+    else
+      applySeatCosmetics(fromColor, true)
+      applySeatCosmetics(toColor)
+      scheduleReapply({ 0.5, 1.5, 3 })
+    end
   end, 2)
 end
 
@@ -1914,6 +1953,7 @@ function forceEngineSwapSteam(params)
   params = params or {}
   local steamId = params.steam_id
   local target = params.target or 'Purple'
+  local skipVectors = params.skip_vectors and true or false
   local player = playerBySteamId(steamId)
   if not player then return end
   local seat = player.color
@@ -1933,13 +1973,18 @@ function forceEngineSwapSteam(params)
   if uiOwner == seat then
     closePicker(player)
   end
-  performSwap(seat, target)
+  performSwap(seat, target, { skip_vectors = skipVectors })
   local r, g, b = defaultSeatRgb(target)
-  broadcastToAll(seat..' → '..target..' (chat/list + mat). Use Apply anytime for a custom mat color.', { r, g, b })
+  if skipVectors then
+    broadcastToAll(seat..' → '..target..' (chat/list + texture mat).', { r, g, b })
+  else
+    broadcastToAll(seat..' → '..target..' (chat/list + mat). Use Apply anytime for a custom mat color.', { r, g, b })
+  end
 end
 
 function forceEngineRevertSteam(params)
   params = params or {}
+  local skipVectors = params.skip_vectors and true or false
   local player = playerBySteamId(params.steam_id)
   if not player then return end
   local seat = player.color
@@ -1960,7 +2005,7 @@ function forceEngineRevertSteam(params)
   if uiOwner == seat then
     closePicker(player)
   end
-  performSwap(seat, origin)
+  performSwap(seat, origin, { skip_vectors = skipVectors })
   broadcastToAll('Seat reverted to '..origin..'.', {0.8, 0.8, 0.8})
 end
 
