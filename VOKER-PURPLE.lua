@@ -15,8 +15,9 @@ local TARGET = 'Purple'
 local PICKER_NAME = 'Seat Color Picker'
 
 -- Hosted on this repo (replace assets/mat.png + push to update).
+-- jsDelivr avoids stale raw.githubusercontent.com cache after replaces.
 local MAT_IMAGE_URL =
-  'https://raw.githubusercontent.com/MrVokerr/TTS-MTG-Color-Picker/master/assets/mat.png'
+  'https://cdn.jsdelivr.net/gh/MrVokerr/TTS-MTG-Color-Picker@master/assets/mat.png'
 
 local NON_SEATS = { Grey = true, Black = true }
 local savedTableUrl = nil
