@@ -14,7 +14,7 @@ local PICKER_NAME = 'Seat Color Picker'
 
 -- COLORMTG 9500x5600; transparent seat baked with TTS Purple (160,32,240).
 local MAT_IMAGE_URL =
-  'https://cdn.jsdelivr.net/gh/MrVokerr/TTS-MTG-Color-Picker@master/assets/mat-purple.png'
+  'https://cdn.jsdelivr.net/gh/MrVokerr/TTS-MTG-Color-Picker@4ce2e5b/assets/mat-purple.png'
 
 local TTS_PURPLE = { r = 0.627, g = 0.125, b = 0.941 }
 
