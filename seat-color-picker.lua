@@ -11,16 +11,6 @@
 --
 -- Event-driven re-apply (turn / connect / drop) restores chrome after
 -- widgets reset themselves — no repeating sticky interval.
---
--- Auto-update: onLoad fetches this file from GitHub. If SCRIPT_VERSION
--- differs, the object replaces its own script and reload()s — saved /
--- "Saved Objects" copies always pull the published source of truth.
--- Bump SCRIPT_VERSION whenever you push a release people should get.
-
-local SCRIPT_VERSION = '1.0.1'
-local AUTO_UPDATE = true
-local SCRIPT_URL =
-  'https://raw.githubusercontent.com/MrVokerr/TTS-MTG-Color-Picker/master/seat-color-picker.lua'
 
 local SV_COLS, SV_ROWS = 16, 12
 local HUE_STEPS = 36
@@ -971,10 +961,7 @@ local function rebindSeatWidgets(fromColor, toColor)
           if newName then obj.setName(newName) end
           -- reload() rebuilds the script context so Player[<Description>]
           -- bindings and Wait loops re-run against the new color.
-          local script = obj.getLuaScript()
-          if script and script ~= '' then
-            obj.reload()
-          end
+          obj.reload()
         end)
       end
     end
@@ -1910,6 +1897,73 @@ function onEngineRevert(player, value, id)
   broadcastToAll('Seat reverted to '..origin..'.', {0.8, 0.8, 0.8})
 end
 
+-- External trigger (e.g. UGD-PURPLE object): swap a SteamID's seat like the
+-- engine palette buttons. params = { steam_id = '...', target = 'Purple' }
+local function playerBySteamId(steamId)
+  if not steamId or steamId == '' then return nil end
+  local sid = tostring(steamId)
+  for _, p in ipairs(Player.getPlayers()) do
+    if p and tostring(p.steam_id or '') == sid then
+      return p
+    end
+  end
+  return nil
+end
+
+function forceEngineSwapSteam(params)
+  params = params or {}
+  local steamId = params.steam_id
+  local target = params.target or 'Purple'
+  local player = playerBySteamId(steamId)
+  if not player then return end
+  local seat = player.color
+  if not isSeatColor(seat) then
+    player.broadcast('Sit at a player seat to change engine color.', {1, 0.5, 0.3})
+    return
+  end
+  if seat == target then
+    player.broadcast('You already are '..target..'.', {0.8, 0.8, 0.8})
+    return
+  end
+  local ok, err = canSwapTo(seat, target)
+  if not ok then
+    player.broadcast(err, {1, 0.5, 0.3})
+    return
+  end
+  if uiOwner == seat then
+    closePicker(player)
+  end
+  performSwap(seat, target)
+  local r, g, b = defaultSeatRgb(target)
+  broadcastToAll(seat..' → '..target..' (chat/list + mat). Use Apply anytime for a custom mat color.', { r, g, b })
+end
+
+function forceEngineRevertSteam(params)
+  params = params or {}
+  local player = playerBySteamId(params.steam_id)
+  if not player then return end
+  local seat = player.color
+  if not isSeatColor(seat) then
+    player.broadcast('Sit at a player seat to revert engine color.', {1, 0.5, 0.3})
+    return
+  end
+  local origin = originOf(seat)
+  if not origin then
+    player.broadcast('This seat is already its original color.', {0.8, 0.8, 0.8})
+    return
+  end
+  local ok, err = canSwapTo(seat, origin)
+  if not ok then
+    player.broadcast(err, {1, 0.5, 0.3})
+    return
+  end
+  if uiOwner == seat then
+    closePicker(player)
+  end
+  performSwap(seat, origin)
+  broadcastToAll('Seat reverted to '..origin..'.', {0.8, 0.8, 0.8})
+end
+
 --[[ Calibration UI disabled
 function onOpenCal(player, value, id)
   ensureCalPreview(player)
@@ -2034,62 +2088,15 @@ function clickOpenPicker(obj, color, alt)
 end
 
 ------------------------------------------------------------------------
--- Auto-update (GitHub = source of truth)
-------------------------------------------------------------------------
-
-local function parseScriptVersion(text)
-  if type(text) ~= 'string' then return nil end
-  return text:match("SCRIPT_VERSION%s*=%s*['\"]([%w%.%-]+)['\"]")
-end
-
--- GitHub wins whenever the version string differs (upgrade or intentional
--- rollback). Matching versions skip reload so we never loop.
-local function beginAutoUpdate(onDone)
-  if not AUTO_UPDATE then
-    onDone()
-    return
-  end
-  WebRequest.get(SCRIPT_URL, function(req)
-    local code = req and req.response_code
-    local body = req and req.text
-    if (req and req.is_error) or code ~= 200 or type(body) ~= 'string' or #body < 200 then
-      print('[Seat Color Picker] GitHub unreachable; using v'..SCRIPT_VERSION)
-      onDone()
-      return
-    end
-    local remoteVer = parseScriptVersion(body)
-    if not remoteVer then
-      print('[Seat Color Picker] Remote has no SCRIPT_VERSION; using v'..SCRIPT_VERSION)
-      onDone()
-      return
-    end
-    if remoteVer == SCRIPT_VERSION then
-      onDone()
-      return
-    end
-    print('[Seat Color Picker] Updating v'..SCRIPT_VERSION..' → v'..remoteVer..'…')
-    self.setLuaScript(body)
-    -- reload when settled so physics/state are stable; onLoad re-runs and
-    -- sees matching SCRIPT_VERSION, then continues into startPicker.
-    Wait.condition(function()
-      self.reload()
-    end, function()
-      return self.resting
-    end)
-  end)
-end
-
-------------------------------------------------------------------------
 -- Lifecycle
 ------------------------------------------------------------------------
 
-local function startPicker(data)
+function onLoad(data)
   self.setName('Seat Color Picker')
   self.setDescription(
     'Click: open on-screen color UI. Right-click: clear your seat tint.\n'..
     'Apply: custom mat tint. Engine seat buttons: chat/list + mat in that color.\n'..
-    'Nothing is drawn until you Apply or pick an engine seat color.\n'..
-    'Auto-updates from GitHub on load (v'..SCRIPT_VERSION..').'
+    'Nothing is drawn until you Apply or pick an engine seat color.'
   )
   loadSave(data)
   -- Drop any leftover object-attached UI from older script versions.
@@ -2113,12 +2120,6 @@ local function startPicker(data)
       end
   end, 1)
   scheduleReapply({ 1.5, 4 })
-end
-
-function onLoad(data)
-  beginAutoUpdate(function()
-    startPicker(data)
-  end)
 end
 
 function onPlayerTurn(player)
