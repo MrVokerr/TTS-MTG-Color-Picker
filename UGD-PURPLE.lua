@@ -1,18 +1,21 @@
 -- UGD → Purple (standalone companion)
--- SteamID-gated. Uses the SAME engine-seat swap rules as seat-color-picker.lua
--- (hand-zone Technique J). Does NOT replace the Custom Table image (keeps the
--- table's normal 4/6/8 seats / art).
---
--- If Seat Color Picker is on the table: calls its forceEngineSwapSteam so mat
--- vectors + widgets use Color.Purple (0.627, 0.125, 0.941) exactly.
--- If not: still does the engine seat swap locally (chat/list/pointer).
+-- SteamID-gated.
+-- Left-click:
+--   1) Put COLORMTG on the Custom Table with the transparent seat filled in
+--      exact TTS Purple (0.627, 0.125, 0.941) — not pink.
+--   2) Same engine-seat swap as seat-color-picker (Technique J → Purple).
+-- Right-click: restore previous table image + original seat.
+-- Does not invent extra seats — only revalues your existing hand zone.
 
 local STEAM_ID = '76561198025584387'
 local TARGET = 'Purple'
 local LABEL = 'UGD'
 local PICKER_NAME = 'Seat Color Picker'
 
--- Exact TTS player Purple (api.tabletopsimulator.com/player/colors)
+-- COLORMTG 9500x5600; transparent seat baked with TTS Purple (160,32,240).
+local MAT_IMAGE_URL =
+  'https://cdn.jsdelivr.net/gh/MrVokerr/TTS-MTG-Color-Picker@master/assets/mat-purple.png'
+
 local TTS_PURPLE = { r = 0.627, g = 0.125, b = 0.941 }
 
 local ENGINE_COLORS = {
@@ -21,6 +24,7 @@ local ENGINE_COLORS = {
 local NON_SEATS = { Grey = true, Black = true }
 local REBIND_SKIP_TYPES = { Card = true, Deck = true }
 
+local savedTableUrl = nil
 local swaps = {} -- [originalSeat] = currentEngineColor
 
 local function availableSeatList()
@@ -47,8 +51,6 @@ local function isSeatColor(color)
   for _, c in ipairs(availableSeatList()) do
     if c == color then return true end
   end
-  -- After Technique J, current color may be Purple even if not in the
-  -- original available list — still treat stock engine seats as valid.
   for _, c in ipairs(ENGINE_COLORS) do
     if c == color then return true end
   end
@@ -63,7 +65,7 @@ local function isEngineColor(color)
 end
 
 local function encodeState()
-  return JSON.encode({ swaps = swaps })
+  return JSON.encode({ savedTableUrl = savedTableUrl, swaps = swaps })
 end
 
 local function updateSave()
@@ -71,10 +73,14 @@ local function updateSave()
 end
 
 local function loadSave(data)
+  savedTableUrl = nil
   swaps = {}
   if not data or data == '' then return end
   local ok, decoded = pcall(JSON.decode, data)
   if not ok or type(decoded) ~= 'table' then return end
+  if type(decoded.savedTableUrl) == 'string' then
+    savedTableUrl = decoded.savedTableUrl
+  end
   if type(decoded.swaps) == 'table' then
     for origin, current in pairs(decoded.swaps) do
       if type(origin) == 'string' and type(current) == 'string' and origin ~= current then
@@ -162,7 +168,6 @@ local function canSwapTo(fromColor, toColor)
   if not isEngineColor(toColor) then
     return false, toColor..' is not a TTS player color.'
   end
-  -- Same gate as seat-color-picker: target must not already be a seated color.
   if #seatHandZones(toColor) > 0 then
     return false, toColor..' is already a seat on this table.'
   end
@@ -177,7 +182,6 @@ local function canSwapTo(fromColor, toColor)
   return true
 end
 
--- Local fallback (identical Technique J as the picker; no table-image rewrite).
 local function performSwapLocal(fromColor, toColor)
   for _, zone in ipairs(seatHandZones(fromColor)) do
     pcall(function() zone.setValue(toColor) end)
@@ -198,6 +202,37 @@ local function performSwapLocal(fromColor, toColor)
     end)
     rebindSeatWidgets(fromColor, toColor)
   end, 2)
+end
+
+local function applyMatImage(player)
+  if not Tables or not Tables.setCustomURL or not Tables.getCustomURL then
+    player.broadcast('Tables.setCustomURL is not available in this TTS build.', {1, 0.5, 0.3})
+    return false
+  end
+  local current = Tables.getCustomURL()
+  if current == nil then
+    player.broadcast('Table is not a Custom Table — cannot swap the mat image.', {1, 0.5, 0.3})
+    return false
+  end
+  if savedTableUrl == nil then
+    savedTableUrl = current
+    updateSave()
+  end
+  pcall(function()
+    Tables.setCustomURL(MAT_IMAGE_URL)
+  end)
+  return true
+end
+
+local function restoreMatImage(player)
+  if not Tables or not Tables.setCustomURL then return end
+  if savedTableUrl == nil or savedTableUrl == '' then
+    player.broadcast('No previous table image saved yet.', {0.8, 0.8, 0.8})
+    return
+  end
+  pcall(function()
+    Tables.setCustomURL(savedTableUrl)
+  end)
 end
 
 local function showButton()
@@ -234,8 +269,12 @@ function clickPurple(obj, color, alt)
   local picker = findPicker()
 
   if alt then
+    restoreMatImage(player)
     if picker then
-      picker.call('forceEngineRevertSteam', { steam_id = STEAM_ID })
+      picker.call('forceEngineRevertSteam', {
+        steam_id = STEAM_ID,
+        skip_vectors = true,
+      })
       return
     end
     local origin = originOf(color)
@@ -253,26 +292,29 @@ function clickPurple(obj, color, alt)
     return
   end
 
-  -- Prefer picker: same mat vectors + Exact TTS Purple as the Purple button.
-  if picker then
-    picker.call('forceEngineSwapSteam', {
-      steam_id = STEAM_ID,
-      target = TARGET,
-      skip_vectors = false,
-    })
-    return
-  end
-
   local ok, err = canSwapTo(color, TARGET)
   if not ok then
     player.broadcast(err, {1, 0.5, 0.3})
     return
   end
-  performSwapLocal(color, TARGET)
-  broadcastToAll(
-    color..' → '..TARGET..' (engine seat). Add Seat Color Picker for mat line-work.',
-    { TTS_PURPLE.r, TTS_PURPLE.g, TTS_PURPLE.b }
-  )
+
+  -- 1) COLORMTG with transparent seat = TTS Purple
+  applyMatImage(player)
+
+  -- 2) Same engine swap as picker; skip vectors (texture owns seat lines)
+  if picker then
+    picker.call('forceEngineSwapSteam', {
+      steam_id = STEAM_ID,
+      target = TARGET,
+      skip_vectors = true,
+    })
+  else
+    performSwapLocal(color, TARGET)
+    broadcastToAll(
+      color..' → '..TARGET..' (chat/list + COLORMTG purple seat).',
+      { TTS_PURPLE.r, TTS_PURPLE.g, TTS_PURPLE.b }
+    )
+  end
 end
 
 function onSave()
@@ -283,10 +325,10 @@ function onLoad(data)
   loadSave(data)
   self.setName(LABEL..' → Purple')
   self.setDescription(
-    'Authorized SteamID only. Same engine-seat swap as Seat Color Picker.\n'..
-    'Left-click: swap your seat to TTS Purple (does not rewrite table art).\n'..
-    'Right-click: restore original seat.\n'..
-    'With Seat Color Picker present: also paints mat/widgets in TTS Purple.'
+    'Authorized SteamID only.\n'..
+    'Left-click: COLORMTG table art (transparent seat = TTS Purple) + engine Purple.\n'..
+    'Right-click: restore previous table image + original seat.\n'..
+    'Same hand-zone swap rules as Seat Color Picker (does not add seats).'
   )
   showButton()
 end
