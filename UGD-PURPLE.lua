@@ -113,6 +113,85 @@ local function seatHandZones(color)
   return out
 end
 
+-- Pie's scripts sometimes respawn the full 10-color hand set after TableURL
+-- changes. Snapshot the real 4p (or 6/8) layout and prune extras afterward.
+local function listHandZones()
+  local out = {}
+  local ok, hands = pcall(function() return Hands.getHands() end)
+  if not ok or type(hands) ~= 'table' then return out end
+  for _, z in ipairs(hands) do
+    local okG, guid = pcall(function() return z.getGUID() end)
+    local okV, value = pcall(function() return z.getValue() end)
+    if okG and guid then
+      table.insert(out, { zone = z, guid = guid, value = okV and value or nil })
+    end
+  end
+  return out
+end
+
+local function captureSeatBaseline()
+  local colors, count = {}, 0
+  for _, h in ipairs(listHandZones()) do
+    count = count + 1
+    if type(h.value) == 'string' and not NON_SEATS[h.value] then
+      colors[h.value] = true
+    end
+  end
+  return { count = count, colors = colors }
+end
+
+local function allowedColorsAfterSwap(baseline, fromColor, toColor)
+  local allowed = {}
+  if not baseline or type(baseline.colors) ~= 'table' then return allowed end
+  for c, _ in pairs(baseline.colors) do
+    if c == fromColor and fromColor ~= toColor then
+      allowed[toColor] = true
+    else
+      allowed[c] = true
+    end
+  end
+  return allowed
+end
+
+local function enforceSeatLayout(baseline, fromColor, toColor)
+  if not baseline or not baseline.count or baseline.count < 1 then return end
+  local allowed = allowedColorsAfterSwap(baseline, fromColor, toColor)
+  if not next(allowed) then return end
+  local maxCount = baseline.count
+
+  -- Drop zones for colors that were never on this table (e.g. Brown…Pink).
+  for _, h in ipairs(listHandZones()) do
+    if h.value and not allowed[h.value] then
+      pcall(function() h.zone.destruct() end)
+    end
+  end
+
+  -- Drop duplicate zones for the same color.
+  local seen = {}
+  for _, h in ipairs(listHandZones()) do
+    local v = h.value or ''
+    if seen[v] then
+      pcall(function() h.zone.destruct() end)
+    else
+      seen[v] = true
+    end
+  end
+
+  -- Hard cap at the original seat count.
+  local hands = listHandZones()
+  for i = maxCount + 1, #hands do
+    pcall(function() hands[i].zone.destruct() end)
+  end
+end
+
+local function scheduleEnforce(baseline, fromColor, toColor)
+  for _, d in ipairs({ 0.2, 0.8, 2.0, 4.0 }) do
+    Wait.time(function()
+      enforceSeatLayout(baseline, fromColor, toColor)
+    end, d)
+  end
+end
+
 local function originOf(color)
   for origin, current in pairs(swaps) do
     if current == color then return origin end
@@ -282,40 +361,53 @@ function clickPurple(obj, color, alt)
   local picker = findPicker()
 
   if alt then
+    local baseline = captureSeatBaseline()
+    local fromColor = color
+    local origin = originOf(color) or color
     restoreMatImage(player)
     if picker then
       picker.call('forceEngineRevertSteam', {
         steam_id = STEAM_ID,
         skip_vectors = true,
       })
+      scheduleEnforce(baseline, fromColor, origin)
       return
     end
-    local origin = originOf(color)
-    if not origin then
+    if not originOf(color) then
+      scheduleEnforce(baseline, fromColor, fromColor)
       player.broadcast('This seat is already its original color.', {0.8, 0.8, 0.8})
       return
     end
     local ok, err = canSwapTo(color, origin)
     if not ok then
+      scheduleEnforce(baseline, fromColor, fromColor)
       player.broadcast(err, {1, 0.5, 0.3})
       return
     end
     performSwapLocal(color, origin)
+    scheduleEnforce(baseline, fromColor, origin)
     broadcastToAll('Seat reverted to '..origin..'.', {0.8, 0.8, 0.8})
     return
   end
 
+  -- Lock the real 4p/6p/8p hand-zone set before TableURL change (Pie may
+  -- respawn all 10 stock colors when the custom mat image is applied).
+  local baseline = captureSeatBaseline()
+  local fromColor = color
+
   -- 1) Always put COLORMTG down first (even if seat swap is a no-op).
   applyMatImage(player)
 
-  -- 2) Engine seat: revalue THIS seat's hand zone only (still 4 seats on 4p).
+  -- 2) Engine seat: revalue THIS seat's hand zone only.
   --    Same Technique J as seat-color-picker; skip vectors (texture has lines).
   if color == TARGET then
+    scheduleEnforce(baseline, fromColor, TARGET)
     player.broadcast('Already Purple — mat image refreshed.', TTS_PURPLE)
     return
   end
   local ok, err = canSwapTo(color, TARGET)
   if not ok then
+    scheduleEnforce(baseline, fromColor, fromColor)
     player.broadcast(err, {1, 0.5, 0.3})
     return
   end
@@ -332,6 +424,7 @@ function clickPurple(obj, color, alt)
       { TTS_PURPLE.r, TTS_PURPLE.g, TTS_PURPLE.b }
     )
   end
+  scheduleEnforce(baseline, fromColor, TARGET)
 end
 
 function onSave()
