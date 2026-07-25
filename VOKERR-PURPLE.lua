@@ -1,4 +1,4 @@
--- UGD → Purple (standalone companion)
+-- VOKERR → Purple (standalone companion)
 -- SteamID-gated. Uses the SAME engine-seat swap rules as seat-color-picker.lua
 -- (hand-zone Technique J). Does NOT replace the Custom Table image (keeps the
 -- table's normal 4/6/8 seats / art).
@@ -7,9 +7,9 @@
 -- vectors + widgets use Color.Purple (0.627, 0.125, 0.941) exactly.
 -- If not: still does the engine seat swap locally (chat/list/pointer).
 
-local STEAM_ID = '76561198025584387'
+local STEAM_ID = '76561197991782511'
 local TARGET = 'Purple'
-local LABEL = 'UGD'
+local LABEL = 'VOKERR'
 local PICKER_NAME = 'Seat Color Picker'
 
 -- Exact TTS player Purple (api.tabletopsimulator.com/player/colors)
