@@ -205,34 +205,47 @@ local function performSwapLocal(fromColor, toColor)
 end
 
 local function applyMatImage(player)
-  if not Tables or not Tables.setCustomURL or not Tables.getCustomURL then
+  if not Tables or not Tables.setCustomURL then
     player.broadcast('Tables.setCustomURL is not available in this TTS build.', {1, 0.5, 0.3})
     return false
   end
-  local current = Tables.getCustomURL()
-  if current == nil then
-    player.broadcast('Table is not a Custom Table — cannot swap the mat image.', {1, 0.5, 0.3})
-    return false
-  end
+  -- Remember whatever is on the table now (nil/empty still OK to restore later).
   if savedTableUrl == nil then
-    savedTableUrl = current
+    local prev = nil
+    pcall(function() prev = Tables.getCustomURL() end)
+    savedTableUrl = prev or ''
     updateSave()
   end
-  pcall(function()
+  local ok, err = pcall(function()
     Tables.setCustomURL(MAT_IMAGE_URL)
   end)
+  if not ok then
+    player.broadcast('Mat image swap failed: '..tostring(err), {1, 0.5, 0.3})
+    return false
+  end
+  local now = nil
+  pcall(function() now = Tables.getCustomURL() end)
+  if now ~= MAT_IMAGE_URL then
+    player.broadcast(
+      'Mat swap may have failed (table may not be Custom). URL still set — check table art.',
+      {1, 0.7, 0.3}
+    )
+  else
+    player.broadcast('COLORMTG mat applied (transparent seat = TTS Purple).', TTS_PURPLE)
+  end
   return true
 end
 
 local function restoreMatImage(player)
   if not Tables or not Tables.setCustomURL then return end
-  if savedTableUrl == nil or savedTableUrl == '' then
+  if savedTableUrl == nil then
     player.broadcast('No previous table image saved yet.', {0.8, 0.8, 0.8})
     return
   end
   pcall(function()
     Tables.setCustomURL(savedTableUrl)
   end)
+  player.broadcast('Previous table mat restored.', {0.8, 0.8, 0.8})
 end
 
 local function showButton()
@@ -292,16 +305,20 @@ function clickPurple(obj, color, alt)
     return
   end
 
+  -- 1) Always put COLORMTG down first (even if seat swap is a no-op).
+  applyMatImage(player)
+
+  -- 2) Engine seat: revalue THIS seat's hand zone only (still 4 seats on 4p).
+  --    Same Technique J as seat-color-picker; skip vectors (texture has lines).
+  if color == TARGET then
+    player.broadcast('Already Purple — mat image refreshed.', TTS_PURPLE)
+    return
+  end
   local ok, err = canSwapTo(color, TARGET)
   if not ok then
     player.broadcast(err, {1, 0.5, 0.3})
     return
   end
-
-  -- 1) COLORMTG with transparent seat = TTS Purple
-  applyMatImage(player)
-
-  -- 2) Same engine swap as picker; skip vectors (texture owns seat lines)
   if picker then
     picker.call('forceEngineSwapSteam', {
       steam_id = STEAM_ID,
@@ -311,7 +328,7 @@ function clickPurple(obj, color, alt)
   else
     performSwapLocal(color, TARGET)
     broadcastToAll(
-      color..' → '..TARGET..' (chat/list + COLORMTG purple seat).',
+      color..' → '..TARGET..' (chat/list). Mat: COLORMTG purple seat.',
       { TTS_PURPLE.r, TTS_PURPLE.g, TTS_PURPLE.b }
     )
   end
